@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const mysql = require('mysql2');
+const mongoose = require('mongoose');
 const path = require('path');
 const cors = require('cors');
 
@@ -13,21 +13,22 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cors());
 
-// MySQL connection
-const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME
+// MongoDB connection
+mongoose.connect(process.env.MONGO_URL)
+  .then(() => {
+    console.log('Connected to MongoDB database.');
+  })
+  .catch(err => {
+    console.error('Error connecting to MongoDB:', err);
+    throw err;
+  });
+
+// Define a schema and model for emails
+const emailSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true }
 });
 
-db.connect((err) => {
-  if (err) {
-    console.error('Error connecting to the database:', err);
-    throw err;
-  }
-  console.log('Connected to MySQL database.');
-});
+const Email = mongoose.model('Email', emailSchema);
 
 // Root route
 app.get('/', (req, res) => {
@@ -38,7 +39,7 @@ app.get('/', (req, res) => {
 app.use('/papers', express.static(path.join(__dirname, 'papers')));
 
 // Route to handle email submissions and respond with PDF URL
-app.post('/submit-email', (req, res) => {
+app.post('/submit-email', async (req, res) => {
   const { email, paper } = req.body;
 
   // Validate email
@@ -46,13 +47,10 @@ app.post('/submit-email', (req, res) => {
     return res.status(400).send('Invalid email address.');
   }
 
-  // Save email to database
-  const query = 'INSERT INTO emails (email) VALUES (?)';
-  db.query(query, [email], (err, result) => {
-    if (err) {
-      console.error('Error saving email to database:', err);
-      return res.status(500).send('Error saving email.');
-    }
+  try {
+    // Save email to database
+    const newEmail = new Email({ email });
+    await newEmail.save();
     console.log('Email saved to database.');
 
     // Respond with the appropriate PDF URL
@@ -74,7 +72,10 @@ app.post('/submit-email', (req, res) => {
     // Create the full URL for the PDF
     const pdfUrl = `${req.protocol}://${req.get('host')}/papers/${pdfPath}`;
     res.json({ pdfUrl });
-  });
+  } catch (err) {
+    console.error('Error saving email to database:', err);
+    res.status(500).send('Error saving email.');
+  }
 });
 
 // Start server
